@@ -1,0 +1,5 @@
+__pycache__/
+*.pth
+data/
+nohup.out
+output.log
