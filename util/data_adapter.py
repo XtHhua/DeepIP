@@ -14,6 +14,7 @@ Date: 2023-12-10 15:04:06
 LastEditors: XtHhua
 LastEditTime: 2023-12-10 15:04:26
 """
+import os
 import sys
 
 sys.path.append("/data/xuth/deep_ipr")
@@ -21,8 +22,10 @@ sys.path.append("/data/xuth/deep_ipr")
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10
 from torchvision.datasets import CIFAR100
+from torchvision import datasets
 from torch.utils.data import random_split
-
+from torch.utils.data import Dataset
+from sklearn.model_selection import train_test_split
 
 from new2024.config.config import PROJECT_ROOT_DIR
 from new2024.config.config import CIFAR_MEAN
@@ -36,48 +39,70 @@ CIFAR_TRANSFORM = transforms.Compose(
 )
 
 
-def split_cifar_train(dataset_name: str):
+def defend_attack_split(dataset: Dataset):
     """split trainset of cifar series to defend and attach dataset."""
-
-    if dataset_name == "cifar100":
-        cifar_dataset = CIFAR100(
-            root=f"{PROJECT_ROOT_DIR}/data",
-            train=True,
-            download=True,
-            transform=CIFAR_TRANSFORM,
-        )
-    elif dataset_name == "cifar":
-        cifar_dataset = CIFAR10(
-            root=f"{PROJECT_ROOT_DIR}/data",
-            train=True,
-            download=True,
-            transform=CIFAR_TRANSFORM,
-        )
-
-    half_size = len(cifar_dataset) // 2
+    half_size = len(dataset) // 2
     defend_dataset, attack_dataset = random_split(
-        cifar_dataset, [half_size, len(cifar_dataset) - half_size]
+        dataset, [half_size, len(dataset) - half_size]
     )
     return defend_dataset, attack_dataset
 
 
-def load_test_dataset(dataset_name: str):
-    if dataset_name == "cifar10":
-        test_dataset = CIFAR10(
-            root=f"{PROJECT_ROOT_DIR}/data",
-            train=False,
-            download=True,
-            transform=CIFAR_TRANSFORM,
+class TinyImageDatasetFromFolder:
+    @staticmethod
+    def load_data(selection: str):
+        transform = transforms.Compose(
+            [
+                transforms.Resize(224),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]
         )
-    elif dataset_name == "cifar100":
-        test_dataset = CIFAR100(
-            root=f"{PROJECT_ROOT_DIR}/data",
-            train=False,
-            download=True,
-            transform=CIFAR_TRANSFORM,
+        dataset = datasets.ImageFolder(
+            root=os.path.join(PROJECT_ROOT_DIR, f"data/tiny-imagenet-200/{selection}"),
+            transform=transform,
         )
-    return test_dataset
+        return dataset
+
+
+cifar = {"cifar10": CIFAR10, "cifar100": CIFAR100}
+
+
+class SplitDataConverter:
+    @staticmethod
+    def split(dataset_name: str):
+        if dataset_name in ["cifar10", "cifar100"]:
+            train_dataset = cifar[dataset_name](
+                root=f"{PROJECT_ROOT_DIR}/data",
+                train=True,
+                download=True,
+                transform=CIFAR_TRANSFORM,
+            )
+            test_dataset = cifar[dataset_name](
+                root=f"{PROJECT_ROOT_DIR}/data",
+                train=False,
+                download=True,
+                transform=CIFAR_TRANSFORM,
+            )
+            train_dataset, dev_dataset = train_test_split(
+                train_dataset, test_size=0.1, train_size=0.9, shuffle=True
+            )
+        elif dataset_name in ["tinyimage"]:
+            train_dataset = TinyImageDatasetFromFolder().load_data("train")
+            dev_dataset = TinyImageDatasetFromFolder().load_data("val")
+            test_dataset = TinyImageDatasetFromFolder().load_data("test")
+        else:
+            raise NotImplementedError
+        return train_dataset, dev_dataset, test_dataset
 
 
 if __name__ == "__main__":
-    load_test_dataset(dataset_name="cifar100")
+    # train, dev, test = SplitDataConverter().split("cifar10")
+    # defenad, attack = defend_attack_split(train)
+    # print(len(defenad), len(attack), len(dev), len(test))
+    # train, dev, test = SplitDataConverter().split("cifar100")
+    # defenad, attack = defend_attack_split(train)
+    # print(len(defenad), len(attack), len(dev), len(test))
+    train, dev, test = SplitDataConverter().split("tinyimage")
+    defenad, attack = defend_attack_split(train)
+    print(len(defenad), len(attack), len(dev), len(test))

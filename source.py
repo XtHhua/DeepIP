@@ -1,5 +1,8 @@
 import os
 import argparse
+import sys
+
+sys.path.append("/data/xuth/deep_ipr")
 
 import torch
 import torch.nn as nn
@@ -9,10 +12,12 @@ from torch.optim import lr_scheduler
 from torchvision.models import vgg16_bn
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+from torchvision.models.vgg import VGG16_BN_Weights
 from torch.utils.tensorboard import SummaryWriter
 
 from new2024.util import seed
-from new2024.util import data_adapter
+from new2024.util.data_adapter import SplitDataConverter
+from new2024.util.data_adapter import defend_attack_split
 from new2024.config.config import PROJECT_ROOT_DIR
 
 
@@ -85,12 +90,16 @@ def fit(
     model: torch.nn.Module,
     args: argparse.ArgumentParser,
     train_dataset: Dataset,
+    dev_dataset: Dataset,
     test_dataset: Dataset,
     device: torch.device,
 ):
     model.to(device)
     train_loader = DataLoader(
         dataset=train_dataset, batch_size=args.batch_size, shuffle=True
+    )
+    dev_loader = DataLoader(
+        dataset=dev_dataset, batch_size=args.batch_size, shuffle=False
     )
     test_loader = DataLoader(
         dataset=test_dataset, batch_size=args.batch_size, shuffle=False
@@ -116,16 +125,25 @@ def fit(
             verbose=False,
         )
         writer.add_scalar("Loss/Train", train_loss, epoch_id)
-        test_loss, test_acc = test(
+        dev_loss, dev_acc = test(
             model=model,
-            data_loader=test_loader,
+            data_loader=dev_loader,
             loss_fn=loss_fn,
             device=device,
             verbose=False,
         )
-        writer.add_scalar("Loss/Test", test_loss, epoch_id)
-        writer.add_scalar("Acc/Test", test_acc, epoch_id)
+        writer.add_scalar("Loss/Dev", dev_loss, epoch_id)
+        writer.add_scalar("Acc/Dev", dev_acc, epoch_id)
     writer.close()
+    test_loss, test_acc = test(
+        model=model,
+        data_loader=test_loader,
+        loss_fn=loss_fn,
+        device=device,
+        verbose=False,
+    )
+    writer.add_scalar("Loss/Test", test_loss)
+    writer.add_scalar("Acc/Test", test_acc)
     if test_acc > best_acc:
         best_acc = test_acc
         torch.save(model.state_dict(), os.path.join(save_dir, "model_best.pth"))
@@ -146,12 +164,12 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device("cuda", args.gpu)
 
-    defend_dataset, attack_dataset = data_adapter.split_cifar_train(
+    train_dataset, dev_dataset, test_dataset = SplitDataConverter.split(
         dataset_name=args.dataset
     )
-    test_dataset = data_adapter.load_test_dataset(dataset_name=args.dataset)
+    defend_dataset, attack_dataset = defend_attack_split(train_dataset)
 
-    model = vgg16_bn(weights=True)
+    model = vgg16_bn(weights=VGG16_BN_Weights.DEFAULT)
     num_features = model.classifier[6].in_features
     model.classifier[6] = nn.Linear(num_features, len(test_dataset.classes))
 
@@ -159,6 +177,7 @@ if __name__ == "__main__":
         model=model,
         args=args,
         train_dataset=defend_dataset,
+        dev_dataset=dev_dataset,
         test_dataset=test_dataset,
         device=device,
     )
