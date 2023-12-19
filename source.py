@@ -171,7 +171,8 @@ if __name__ == "__main__":
 
     model = vgg16_bn(weights=VGG16_BN_Weights.DEFAULT)
     num_features = model.classifier[6].in_features
-    model.classifier[6] = nn.Linear(num_features, len(test_dataset.classes))
+    # model.classifier[6] = nn.Linear(num_features, len(test_dataset.classes))
+    model.classifier[6] = nn.Linear(num_features, 200)
 
     fit(
         model=model,
@@ -194,3 +195,6 @@ if __name__ == "__main__":
     # )
     # acc = utils.test(model=model, dataloader=trigger_loader, device=device)
     # print(acc)
+
+
+# nohup python source.py --batch_size 64 --epochs 100 --dataset tinyimage --gpu 2 &

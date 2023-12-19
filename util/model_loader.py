@@ -4,18 +4,19 @@ from torch.nn.modules import Module
 from torchvision import models
 
 
-from new2024.config.config import PROJECT_ROOT_DIR
-
-
-class CVModel:
-    def __init__(self, dataset_name: str, device: device):
+class CVModelLoader:
+    def __init__(self, dataset_name: str, device: device = None):
         self.dataset_name = dataset_name
-        self.device = device
+        self.device = device if device else torch.device("cpu")
         self.base_dir = PROJECT_ROOT_DIR + "/model"
         if self.dataset_name == "cifar100":
             self.classes = 100
         elif self.dataset_name == "cifar10":
             self.classes = 10
+        elif self.dataset_name == "tinyimage":
+            self.classes = 200
+        else:
+            raise NotImplementedError
 
     def load_model(self, mode: str, index: int = 0) -> Module:
         if mode == "source":
@@ -24,7 +25,7 @@ class CVModel:
             model.classifier[-1] = torch.nn.Linear(in_feature, self.classes)
             model.load_state_dict(
                 torch.load(
-                    f"{self.base_dir}/{mode}/{self.dataset_name}/model_best.pth"
+                    "/data/xuth/deep_ipr/new2024/model/source/tinyimage/lightning_logs/version_0/checkpoints/best_model.ckpt"
                 ),
                 self.device,
             )

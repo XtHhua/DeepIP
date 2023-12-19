@@ -1,0 +1,6 @@
+PROJECT_ROOT_DIR: /data/xuth/deep_ipr/new2024
+
+cifar_mean: [0.4914, 0.4822, 0.4465]
+cifar_std: [0.2023, 0.1994, 0.2010]
+
+classes: 100

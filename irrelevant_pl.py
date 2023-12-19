@@ -1,11 +1,3 @@
-"""
-Descripttion: DeepModelIPProtection
-version: 1.0
-Author: XtHhua
-Date: 2023-12-13 21:38:04
-LastEditors: XtHhua
-LastEditTime: 2023-12-19 21:22:23
-"""
 import os
 import argparse
 from argparse import Namespace
@@ -16,20 +8,25 @@ sys.path.append("/data/xuth/deep_ipr")
 from torch import nn
 from torch.optim import Adam
 import pytorch_lightning as pl
-from omegaconf import OmegaConf
-from omegaconf import DictConfig
 from torch.nn import CrossEntropyLoss
 from torchvision.models import vgg16_bn
+from torchvision.models import vgg13
+from torchvision.models import resnet18
+from torchvision.models import densenet121
+from torchvision.models import mobilenet_v2
 from torch.utils.data import DataLoader
 from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
+from omegaconf import OmegaConf
+from omegaconf import DictConfig
+
 
 from new2024.util.data_adapter import SplitDataConverter
 from new2024.util.data_adapter import defend_attack_split
 from new2024.util.metric import ClassificationMetric
 
 
-class SourceModel(pl.LightningModule):
+class IrrelevantModel(pl.LightningModule):
     def __init__(self, model: nn.Module, conf: DictConfig):
         super().__init__()
         self.model = model
@@ -116,13 +113,31 @@ def main(args: Namespace):
         test_dataset, batch_size=conf["batch_size"], shuffle=False
     )
     # prepare model
-    base_model = vgg16_bn(weights="DEFAULT")
-    model = SourceModel(base_model, conf)
-    # checkpoint
-    checkpoint = ModelCheckpoint(monitor="val_loss", filename="best_model.ckpt")
-    # trainer
-    trainer = pl.Trainer(**trainer_params, callbacks=[checkpoint])
-    trainer.fit(model, train_dataloader, dev_dataloader)
+    for i in range(20):
+        if i < 5:
+            model = vgg13(weights=True)
+            in_feature = model.classifier[-1].in_features
+            model.classifier[-1] = nn.Linear(in_feature, conf["classes"])
+        elif 5 <= i < 10:
+            model = resnet18(weights=True)
+            in_feature = model.fc.in_features
+            model.fc = nn.Linear(in_feature, conf["classes"])
+        elif 10 <= i < 15:
+            model = densenet121(weights=True)
+            in_feature = model.classifier.in_features
+            model.classifier = nn.Linear(in_feature, conf["classes"])
+        elif 15 <= i < 20:
+            model = mobilenet_v2(weights=True)
+            in_feature = model.classifier[-1].in_features
+            model.classifier[-1] = nn.Linear(in_feature, conf["classes"])
+        model = IrrelevantModel(model, conf)
+        # checkpoint
+        checkpoint = ModelCheckpoint(
+            monitor="val_loss", filename=f"best_model_{i}.ckpt"
+        )
+        # trainer
+        trainer = pl.Trainer(**trainer_params, callbacks=[checkpoint])
+        trainer.fit(model, train_dataloader, dev_dataloader)
 
 
 if __name__ == "__main__":
