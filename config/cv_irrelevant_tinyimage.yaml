@@ -1,15 +1,19 @@
 
-PROJECT_ROOT_DIR: /data/xuth/deep_ipr/new2024
+PROJECT_ROOT_DIR: /data/xuth/deep_ipr/easydeepip
 
-gpu: 5
+gpu: 3
 lr: 0.0005
-epochs: 100
+epochs: 50
 batch_size: 64
 weight_decay: 0.0005
 seed: 42
 model_type: irrelevant
+best_model_name: best_model
 
 dataset_name: tinyimage
 classes: 200
 mean: [0.5,0.5,0.5]
 std: [0.5,0.5,0.5]
+
+model_save_dir: ${PROJECT_ROOT_DIR}/model/${model_type}/${dataset_name}
+log_dir: ${PROJECT_ROOT_DIR}/log/${model_type}/${dataset_name}

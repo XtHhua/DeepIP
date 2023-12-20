@@ -4,3 +4,4 @@ data/
 nohup.out
 output.log
 model/
+log/

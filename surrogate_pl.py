@@ -14,30 +14,32 @@ from torchvision.models import vgg16_bn
 from torch.utils.data import DataLoader
 from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
+from omegaconf import OmegaConf
+from omegaconf import DictConfig
 
 from new2024.util.data_adapter import SplitDataConverter
 from new2024.util.data_adapter import defend_attack_split
 from new2024.util.metric import ClassificationMetric
-from new2024.config.config import PROJECT_ROOT_DIR
-from new2024.source_pl import CVModel
+from new2024.source_pl import SourceModel
 
 
 class SurrogateModel(pl.LightningModule):
-    def __init__(self, model: nn.Module, args: Namespace):
+    def __init__(self, model: nn.Module, conf: DictConfig):
         super().__init__()
         #
-        self.teacher = CVModel.load_from_checkpoint(
-            os.path.join(PROJECT_ROOT_DIR, "model", "source", args.dataset_name)
+        self.teacher = SourceModel.load_from_checkpoint(
+            os.path.join(conf["PROJECT_ROOT_DIR"], "model", "source", args.dataset_name)
         )
         self.model = model
         #
-        self.args = args
+        self.conf = conf
         # loss
         self.train_criterion = CrossEntropyLoss()
         self.val_criterion = CrossEntropyLoss()
         # metric
         self.train_metric = ClassificationMetric(recall=False, precision=False)
         self.val_metric = ClassificationMetric(recall=False, precision=False)
+        self.predict_metric = ClassificationMetric(accuracy=True)
 
     def forward(self, x):
         output = self.model(x)
@@ -78,54 +80,73 @@ class SurrogateModel(pl.LightningModule):
 
     def configure_optimizers(self):
         return Adam(
-            self.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay
+            self.parameters(),
+            lr=self.conf["lr"],
+            weight_decay=self.conf["weight_decay"],
         )
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
+        x, y = batch
+        _y = self(x)
+        acc = self.predict_metric.update(_y, y)
+        return acc
+
+    def on_predict_end(self) -> None:
+        acc = self.predict_metric.compute()
+        print(acc)
 
 
 def main(args: Namespace):
+    conf = OmegaConf.load(args.conf_file)
+    project_root_dir = conf["PROJECT_ROOT_DIR"]
+    seed_everything(conf["seed"])
     trainer_params = {
         "accelerator": "gpu",
-        "devices": [args.gpu],
-        "max_epochs": args.epochs,  # 1000
+        "devices": [conf["gpu"]],
+        "max_epochs": conf["epochs"],  #
         "enable_checkpointing": True,  # True
         "logger": True,  # TensorBoardLogger
         "default_root_dir": os.path.join(
-            PROJECT_ROOT_DIR, "model", args.model_type, args.dataset_name
+            project_root_dir, "model", conf["model_type"], conf["dataset_name"]
         ),
         "progress_bar_refresh_rate": 1,  # 1
         "num_sanity_val_steps": 0,  # 2
     }
     # prepare data
-    train_dataset, dev_dataset, test_dataset = SplitDataConverter().split(
-        dataset_name=args.dataset_name
-    )
+    train_dataset, dev_dataset, test_dataset = SplitDataConverter().split(conf=conf)
     defend_dataset, attack_dataset = defend_attack_split(train_dataset)
     train_dataloader = DataLoader(
-        defend_dataset, batch_size=args.batch_size, shuffle=True
+        defend_dataset, batch_size=conf["batch_size"], shuffle=True
     )
-    dev_dataloader = DataLoader(dev_dataset, batch_size=args.batch_size, shuffle=False)
-    test_dataset = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    dev_dataloader = DataLoader(
+        dev_dataset, batch_size=conf["batch_size"], shuffle=False
+    )
+    test_dataloader = DataLoader(
+        test_dataset, batch_size=conf["batch_size"], shuffle=False
+    )
     # prepare model
     for i in range(10):
-        base_model = vgg16_bn(weights=None)
-        model = CVModel(base_model, args)
+        base_model = vgg16_bn(weights="DEFAULT")
+        model = SurrogateModel(base_model, args)
         # checkpoint
         checkpoint = ModelCheckpoint(monitor="val_loss", filename=f"best_model_{i}")
         # trainer
         trainer = pl.Trainer(**trainer_params, callbacks=[checkpoint])
         trainer.fit(model, train_dataloader, dev_dataloader)
 
+        model = SurrogateModel.load_from_checkpoint(
+            os.path.join(trainer_params["default_root_dir"], conf["model_name"])
+        )
+        trainer.predict(model, test_dataloader)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gpu", type=int, default=7)
-    parser.add_argument("--lr", type=float, default=5e-4)
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--model_type", type=str, default="surrogate")
-    parser.add_argument("--weight_decay", type=float, default=5e-4)
-    parser.add_argument("--dataset_name", type=str, default="tinyimage")
+    parser.add_argument(
+        "--conf_file",
+        type=str,
+        default="/data/xuth/deep_ipr/new2024/config/cv_surrogate_tinyimage.yaml",
+    )
     args = parser.parse_args()
-    seed_everything(42)
     main(args)
     print("ok")
