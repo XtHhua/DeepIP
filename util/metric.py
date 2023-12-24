@@ -1,3 +1,11 @@
+"""
+Descripttion: DeepModelIPProtection
+version: 1.0
+Author: XtHhua
+Date: 2023-12-19 21:22:00
+LastEditors: XtHhua
+LastEditTime: 2023-12-21 20:48:30
+"""
 import gc
 
 from sklearn.metrics import f1_score

@@ -1,0 +1,31 @@
+PROJECT_ROOT_DIR: /data/xuth/deep_ipr/easydeepip
+
+module:
+  lr: 0.1
+  momentum: 0.9
+  epochs: 200
+  weight_decay: 0.0005
+  nesterov: True
+  milestones: [60, 120, 160]
+  gamma: 0.2
+
+
+epochs: 200
+gpu: 5
+
+dataloader:
+  batch_size: 128
+  pin_memory: True
+
+dataset:
+  name: cifar100
+  classes: 100
+  mean: [0.4914, 0.4822, 0.4465]
+  std: [0.2023, 0.1994, 0.2010]
+
+common:
+  seed: 42
+  model_type: source
+  best_model_name: best_model
+  model_save_dir: ${PROJECT_ROOT_DIR}/model/${common.model_type}/${dataset.name}
+  log_dir: ${PROJECT_ROOT_DIR}/log/${common.model_type}/${dataset.name}

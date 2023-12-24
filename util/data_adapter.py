@@ -26,7 +26,8 @@ from torchvision import datasets
 from torch.utils.data import random_split
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
-from omegaconf import DictConfig
+
+PROJECT_ROOT_DIR = "/data/xuth/deep_ipr/easydeepip"
 
 
 def defend_attack_split(dataset: Dataset):
@@ -60,12 +61,10 @@ cifar = {"cifar10": CIFAR10, "cifar100": CIFAR100}
 
 class SplitDataConverter:
     @staticmethod
-    def split(conf: DictConfig):
-        dataset_name = conf["dataset_name"]
-        PROJECT_ROOT_DIR = conf["PROJECT_ROOT_DIR"]
+    def split(dataset_name):
         if dataset_name in ["cifar10", "cifar100"]:
-            cifar_mean = conf["mean"]
-            cifar_std = conf["std"]
+            cifar_mean = [0.4914, 0.4822, 0.4465]
+            cifar_std = [0.2023, 0.1994, 0.2010]
             transform = transforms.Compose(
                 [
                     transforms.ToTensor(),
@@ -88,14 +87,16 @@ class SplitDataConverter:
                 train_dataset, test_size=0.1, train_size=0.9, shuffle=True
             )
         elif dataset_name in ["tinyimage"]:
+            tiny_mean = [0.5, 0.5, 0.5]
+            tiny_std = [0.5, 0.5, 0.5]
             train_dataset = TinyImageDatasetFromFolder.load_data(
-                "train", PROJECT_ROOT_DIR, conf["mean"], conf["std"]
+                "train", PROJECT_ROOT_DIR, tiny_mean, tiny_std
             )
             dev_dataset = TinyImageDatasetFromFolder.load_data(
-                "val", PROJECT_ROOT_DIR, conf["mean"], conf["std"]
+                "val", PROJECT_ROOT_DIR, tiny_mean, tiny_std
             )
             test_dataset = TinyImageDatasetFromFolder.load_data(
-                "test", PROJECT_ROOT_DIR, conf["mean"], conf["std"]
+                "test", PROJECT_ROOT_DIR, tiny_mean, tiny_std
             )
         else:
             raise NotImplementedError

@@ -1,0 +1,196 @@
+"""
+Descripttion: DeepModelIPProtection
+version: 1.0
+Author: XtHhua
+Date: 2023-12-24 18:43:11
+LastEditors: XtHhua
+LastEditTime: 2023-12-24 18:43:44
+"""
+import os
+import sys
+
+sys.path.append("/data/xuth/deep_ipr")
+import argparse
+
+import torch
+import torch.nn as nn
+from tqdm import tqdm
+from torch.optim import Adam
+from torch.optim import SGD
+from torch.optim.lr_scheduler import MultiStepLR
+from torchvision.models import vgg16_bn
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+
+from easydeepip.util.data_adapter import SplitDataConverter
+from easydeepip.util.data_adapter import defend_attack_split
+from easydeepip.util.seed import seed_everything
+
+
+def train(
+    model: nn.Module,
+    data_loader: DataLoader,
+    loss_fn: nn.CrossEntropyLoss,
+    optimizer: Adam,
+    scheduler: MultiStepLR,
+    verbose: bool = False,
+):
+    model.train()
+    total_batches = len(data_loader)
+    loss_record = []
+
+    for batch_idx, batch_data in enumerate(data_loader):
+        b_x = batch_data[0].to(device)
+        b_y = batch_data[1].to(device)
+        output = model(b_x)
+        loss = loss_fn(output, b_y)
+        #
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        #
+        loss = loss.detach().item()
+        loss_record.append(loss)
+        if batch_idx % 20 == 0 and verbose:
+            accuracy = 100 * (output.argmax(1) == b_y).sum().item() / len(b_y)
+            print(
+                f"loss: {loss:>7f},  accuracy: {accuracy:>0.2f}% [{batch_idx:>5d}/{total_batches:>5d}]"
+            )
+    scheduler.step()
+    mean_train_loss = sum(loss_record) / total_batches
+    return mean_train_loss
+
+
+def test(
+    model: torch.nn.Module,
+    data_loader: DataLoader,
+    loss_fn: torch.nn.CrossEntropyLoss,
+    verbose: bool = False,
+):
+    total_sample_num = len(data_loader.dataset)
+    num_batches = len(data_loader)
+    model.eval()
+    test_loss, correct_sample_num = 0, 0
+    with torch.no_grad():
+        for batch_data in data_loader:
+            b_x = batch_data[0].to(device)
+            b_y = batch_data[1].to(device)
+            output = model(b_x)
+            test_loss += loss_fn(output, b_y).item()
+
+            correct_sample_num += (
+                (output.argmax(1) == b_y).type(torch.float).sum().item()
+            )
+    #
+    test_loss /= num_batches
+    #
+    test_accuracy = correct_sample_num / total_sample_num
+    if verbose:
+        print(f"\nloss: {test_loss:>8f}, accuracy: {test_accuracy:>0.2f}%")
+    return test_loss, test_accuracy
+
+
+def fit(model: nn.Module, index: int, device: torch.device):
+    model.to(device)
+    train_dataset, dev_dataset, test_dataset = SplitDataConverter.split(args.dataset)
+    defend_dataset, attack_dataset = defend_attack_split(train_dataset)
+    train_dataloader = DataLoader(
+        defend_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        pin_memory=True,
+    )
+    dev_dataloader = DataLoader(
+        dev_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        pin_memory=True,
+    )
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        pin_memory=True,
+    )
+    loss_fn = torch.nn.CrossEntropyLoss()
+
+    optimizer = SGD(
+        model.parameters(),
+        lr=args.lr,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay,
+        nesterov=args.nesterov,
+    )
+    scheduler = MultiStepLR(
+        optimizer,
+        milestones=args.milestones,
+        gamma=args.gamma,
+    )
+    save_dir = args.save_dir
+    log_dir = os.path.join(save_dir, f"{index}")
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir)
+    best_acc = 0
+    for epoch_id in tqdm(range(args.epochs)):
+        train_loss = train(
+            model=model,
+            data_loader=train_dataloader,
+            loss_fn=loss_fn,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            verbose=False,
+        )
+        writer.add_scalar("Loss/Train", train_loss, epoch_id)
+        dev_loss, dev_acc = test(
+            model=model, data_loader=dev_dataloader, loss_fn=loss_fn, verbose=False
+        )
+        writer.add_scalar("Loss/Dev", dev_loss, epoch_id)
+        writer.add_scalar("Acc/Dev", dev_acc, epoch_id)
+        test_loss, test_acc = test(
+            model=model, data_loader=test_dataloader, loss_fn=loss_fn, verbose=False
+        )
+        writer.add_scalar("Loss/Test", test_loss, epoch_id)
+        writer.add_scalar("Acc/Test", test_acc, epoch_id)
+        if test_acc > best_acc:
+            best_acc = test_acc
+            model_dir = save_dir.replace("log", "model")
+            if not os.path.exists(model_dir):
+                os.makedirs(model_dir, exist_ok=True)
+            torch.save(
+                model.state_dict(), os.path.join(model_dir, f"model_best_{index}.pth")
+            )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--lr", type=float, default=0.1)
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--classes", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--weight_decay", type=float, default=0.0005)
+    parser.add_argument("--nesterov", type=bool, default=True)
+    parser.add_argument("--milestones", type=list, default=[60, 120, 160])
+    parser.add_argument("--gamma", type=float, default=0.2)
+    parser.add_argument("--dataset", type=str, default="cifar10")
+    parser.add_argument(
+        "--save_dir", type=str, default=f"./log/transfer_learning/cifar100/"
+    )
+    args = parser.parse_args()
+
+    seed_everything(2023)
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda", args.gpu)
+
+    for i in range(10):
+        tea_model = vgg16_bn(weights=None)
+        num_features = tea_model.classifier[6].in_features
+        tea_model.classifier[6] = nn.Linear(num_features, args.classes)
+        tea_model.load_state_dict(
+            torch.load("./model/source/cifar100/model_best.pth", device)
+        )
+
+        fit(model=tea_model, index=i, device=device)
